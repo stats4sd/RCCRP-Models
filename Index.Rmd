@@ -1,0 +1,536 @@
+---
+title: "Statistical Models in R"
+output: 
+  learnr::tutorial:
+    progressive: true
+    allow_skip: true
+    df_print: paged
+runtime: shiny_prerendered
+description: >
+  Statistical Models in R.
+---
+
+
+```{r setup, include=FALSE}
+library(learnr)
+library(tidyverse)
+library(DT)
+library(lmerTest)
+library(multcomp)
+library(multcompView)
+library(emmeans)
+library(MuMIn)
+
+fallow <- read.csv("Fallow N2.csv")
+
+linreg_mod<-lm(yield~striga,data=fallow)
+anova_mod<-lm(yield~treat,data=fallow)
+gen_lin_mod<-lmer(yield~treat+(1|rep),data=fallow)
+
+```
+
+## Introduction
+
+Within this tutorial we will look at a few common statistical modelling approaches often used in agricultural analysis:
+
+1. A linear regression model
+2. An Analysis of Variance (ANOVA) model.
+3. Extending the ANOVA model to a generalized linear model
+
+You will quickly see that the code required in R for all of these modelling approaches is very similar. In fact all of these models are all part of the same general modelling framework - this extends to nearly all of the common models that you could ever want to fit.
+
+![](https://youtu.be/AYLY10wk6PY)
+
+In the video above I explain more generally about models, beyond just the simple straight line linear regression model. The simple straight line linear regression model is nice, and has lots of useful applications. 
+
+But in many cases won't be sufficient to build a comprehensive model to understand our questions and data in full. Although the statistics underlying more advanced methodologies can start to become increasingly complicated, the R code to produce these models does not increase in complexity to anywhere near the same extent! This means that with R we should be able to learn how to analyse our data according to our objectives, rather than trying to use approaches simply because we have already been taught about them or because they are 'easy'.
+
+It is important to match our questions, and our data, to the model that we are using. A model is useless if it does not let us answer the questions we have, or if it is not appropriate for the data that we have. So do not be limited by only using models you 'know' or have been taught about - try to find the right sort of model for you. If you are stuck with this process, reach out to someone to ask them for help in giving you advice! But the nice thing is, that using R means that actually fitting this model may be very straightforward indeed once you know what you are looking for.
+
+## Data
+
+The data used in this example is from a study was conducted in Eastern Zambia with the main objective of improving the efficiency of the natural fallows by using appropriate trees that may have relevance in soil fertility regeneration within permissible fallow periods.
+
+The data has been read into R and assigned to an object called `fallow`.
+
+The design was a RCBD experiment (randomised complete block design) with 4 blocks and 9 treatments. If you take a look at the data below you will see that we have data concerning the measurement of the yield (the column `yield` within the data) and the striga count (`striga`) of a plot (the column `plot`), within a block (the column `rep`), after a specific treatment (the column `treat`). 
+
+```{r,echo=FALSE}
+DT::datatable(fallow)
+```
+
+
+## Packages used
+
+In this tutorial we will use four new packages: `emmeans`, `multcomp`, `lmerTest` and `MuMIn`; in addition we will use some of the packages we have used regularly so far in this course `dplyr` and `ggplot2`. Make sure these are all installed and loaded before running any of the code on your own computer.
+
+```
+library(ggplot2)
+library(dplyr)
+
+library(lmerTest)
+library(multcomp)
+library(multcompView)
+library(emmeans)
+library(MuMIn)
+
+```
+
+
+## Linear regression model
+
+The first type of model we are going to investigate is a linear regression model, exploring whether there is a relationship between `yield` and `striga` from our data. 
+
+We are assuming that you have come across the topic of linear models before. Even if you have, there is a nice video from Crash Course Statistics which provides a nice refresher of the methodology.
+![](https://www.youtube.com/watch?v=WWqE7YHR4Jc) 
+
+As we learnt in the previous modules, the first thing we should do is to explore our data and look at some summary statistics and plots!
+
+### Exploratory data analysis
+
+When considering summary statistics there are two things we could do. Firstly we could calculate a correlation, using the `cor` function. To use this function we need to specify the two variables with which we want to calculate the correlation.
+
+```{r cor1, exercise=TRUE}
+cor(fallow$yield,fallow$striga)
+```
+A value of -0.339 suggests a small-to-moderate size negative correlation between these variables. But correlation is not an especially informative value - fitting a linear model provides us with the same, and much more, information!.
+
+We could also calculate summary statistics of yield based on categorising the striga variable and then calculating means within these groups. We could use `mutate` to create a new variable, and within `mutate()` use the `cut()` function to break `striga` into multiple groups. Using this new variable we can then `group_by()` and `summarise()` the yield values. The `cut` function requires us to set the break points for our new categories - note that the lower limit is exclusive by default, so we need to make sure we include the option `include.lowest=TRUE` to make sure the 0 striga counts are included in this group.
+
+```{r sumstats, exercise=TRUE}
+fallow %>%
+  mutate(striga_grp=cut(striga,breaks=c(0,25,250,9999),include.lowest = TRUE))%>%
+    group_by(striga_grp) %>%
+      summarise(mean(yield),n())
+```
+As we move through the three categories we can see a reduction in the mean yield - from 3.6 t/ha in the lowest striga count group, to 2.88 t/ha in the highest striga count group.Exactly where to put the break points in `cut` and how many groups to choose is a little arbitrary. I chose some fairly round numbers and went with three new categories - from 0 to 25 striga counts, from 26 to 250 striga and then more than 250.
+
+### Plots
+
+Let's look at the 'obvious' plot when considering this sort of relationship between two continuous variables - a scatter plot of striga against yield. We will put `yield` on the y axis and `striga` on the x axis. This is because we are considering yield to be our response variable and striga to be our predictor variable. We think it is more likely that an increased striga infestation will result in reduced yields rather than the other way around (although there is some debate over this!).
+
+See if you can write the code to produce the plot below using the appropriate `geom` from `ggplot2`.
+
+```{r plot0, echo=FALSE}
+ggplot(data=fallow,aes(y=yield,x=striga))+
+  geom_point()
+```
+
+```{r plot1, exercise=TRUE}
+
+```
+
+```{r plot1-solution}
+ggplot(data=fallow,aes(y=yield,x=striga))+
+  geom_point()
+```
+
+To help us understand this relationship better we can also add an additional layer using `geom_smooth` which will fit a trend line. By default this fits a 'generalised additive model' which is similar idea to a moving average. 
+However, we can also use the function to provide the simple linear regression model of a straight line by using the option `method=lm`.
+
+```{r plot2, exercise=TRUE}
+ggplot(data=fallow,aes(y=yield,x=striga))+
+  geom_point()+
+    geom_smooth(method="lm")
+```
+
+It looks like a straight line is probably a reasonably sensible way of fitting the relationship here. We do have lots of points with low striga counts - but as we increase the striga count the trend in yield seems roughly linear and decreasing. While most observations have low striga counts, and among those observations the variability in yield is high, those few observations with higher striga counts all seem to have relatively low yields.
+
+
+### Fitting the model
+
+To examine more about the model that we have plotted using `geom_smooth` we need to formally fit the model in R. We do this using the `lm()` command. Note the function we are using is written with the letter `l` not the number `1`. "lm" stands for "linear model". The syntax for this is very similar to what we saw in the previous module for t-tests, with a response variable, a tilde, then the explanatory variable. Then the name of the dataset after. 
+
+
+```{r lm1, exercise=TRUE}
+lm(yield~striga,data=fallow)
+```
+
+The output here only tells us two things: 
+
+* "Call" - simply repeating back the model we have specified 
+* "Coefficients": Telling us the values of the parameters
+ 
+A linear regression follows the equation of a straight line y = B0 + B1x. You may have learnt this same equation as y=a+bx or y=mx+c ; depending on where and when you went to school. There is then an additional term $\epsilon$ , which represents the residual variability in this relationship. If all the points were to sit perfectly on the line then there would be no need for an $\epsilon$ term, but in reality we always have underlying variability that needs to be accounted for.
+
+The coefficients give us the value of our intercept (B0): 3.43 and the value of our slope (B1): -0.00059
+
+So the overall model would be:
+
+yield = 3.43  - 0.00059 * striga count + $\epsilon$
+
+The value of the intercept is interpreted as the expected value of the response variable where all explanatory variables are equal to zero. So for a plot with no striga, we would expect to see an average yield of 3.43 t/ha.
+
+The value of the slope represents the change we expect to see in the response variable for a one unit increase in the explanatory variable. So for additional striga observed, we expect an average reduction in the yield of 0.00059 t/ha.
+
+The output at this stage has not told us anything about the error term, $\epsilon$. 
+
+However we can get much more information from our model than this! R is a little different from many other software packages, which will produce a lot of different outputs when you create a model. In R you have to ask specifically for what you want out of a model.
+
+But first we usually need to save the model to an object. I am choosing to give it the name `linreg_mod`.
+
+
+```{r lm2, exercise=TRUE}
+linreg_mod<-lm(yield~striga,data=fallow)
+
+```
+
+### Summarising the model
+
+`summary()` provides us with a lot of useful information in a customised output format containing model fit statistics, standard errors and p-values for the coefficients.
+
+```{r lm2s, exercise=TRUE}
+summary(linreg_mod)
+
+```
+
+One of the outputs from `summary()` allows us to complete the full linear regression model, as it provides the value of sigma, also known as the residual standard error. Within our error term, $\epsilon$, this is the standard deviation of the residual values. Because we are doing a simple linear model we assume our residuals are normally distributed with a mean of 0. We will check if that assumption makes sense in a short while.
+
+Overall the information tells us that the relationship between striga count and yield is significant, p=0.043. 
+
+The intercept is also significant. But this is almost certainly not of interest. The null hypothesis which generates this p-value is that the intercept is equal to 0. In other words the null hypothesis is that the expected yield value when there is no striga is 0 t/ha. It is not really surprising to see very strong evidence against this nonsensical null hypothesis! 
+
+If we look back at the output of `summary()` we can also see that 11.5% of the variability in yield can be explained by the linear increase in striga (Multiple R- Squared / r.squared). You can read a little bit about r-squared, and why the adjusted r-squared is also a useful metric to consider [here](https://thestatsgeek.com/2013/10/28/r-squared-and-adjusted-r-squared/).
+
+
+Like with the `t.test` function, the data argument comes after the formula. So if we were to use a pipe from data into `lm()` we would need to specify `data=.` within the `lm` function. However - we can pipe *out* of the model into the later functions, which can be pretty useful. Although we do often want to save the model objects rather than use pipes, because computing the model can take a little bit of time if we have a large dataset or a complicated model. And we often want to do lots of different things with our model, rather than a continuous pipe so if we use pipes the whole way the model has to be recomputed every time we run the code. If we store an object it would run much faster.
+
+```{r lmpipe, exercise=TRUE}
+fallow %>%
+  lm(yield~striga,data=.) %>%
+    summary()
+```
+
+### Checking Model
+
+We should also check our residual plots to assess model validity. It is worth recapping, or learning how to interpret these plots, as it can take some practice to know what you are looking for. "Statistics by Jim" has a nice overview: https://statisticsbyjim.com/regression/ols-linear-regression-assumptions/
+
+```{r chkplot, exercise=TRUE}
+plot(linreg_mod)
+```
+These plots allow us to check a number of different key assumptions related to the linearity of the trend (is there any pattern in the residuals vs. fitted plot?); the homogeneity of variance (is there any pattern in the scale location plot); the approximate normality of the residuals (do the points in the Normal QQ plot roughly follow the line); and the existence of outlying or high leverage points (are any standardised residuals >3 or are any points outisde the funnel in the residuals vs leverage plot).
+
+In this case all four of those checks seem to be satisfactory.
+
+However - there is a much more important consideration which cannot be assessed from these plots - are my points all independent? In this case the answer is certainly "No" which does make the model not valid. This is because when we are producing the model here we have completely ignored the structure of the experiment - we have not considered the different treatments (which will form one source of dependence) and we have not considered the blocks used in this experiment (which will form another source of dependence).
+
+So the model we have produced is not going to be especially valid for a comparison of yield and striga counts! In the exercise we will look at improving this model. But the code we have used will be useful for when you do have to produce linear regressions!
+
+
+## Analysis of Variance
+
+Simple linear regression can be used when we have a continuous outcome variable (like `yield`) and a continuous predictor variable (like `striga`). Often when being taught about statistics we are then taught separately about Analysis of Variance (ANOVA), when we have a continuous outcome variable and a categorical predictor variable, as if this was a completely different method. However, mathematically, theoretically and in terms of how R treats them, these are both identical methods. There is a nice explanation of this [here](https://www.theanalysisfactor.com/why-anova-and-linear-regression-are-the-same-analysis/). 
+
+Both of these methods are examples of 'general linear models', and to fit an ANOVA model we use nearly all the same functions as we used in the previous section. We will use some more functions to explore our model results this time, and these will use some additional packages to help make interpretations across the groups. We will use the `emmeans` and `multcomp` packages to estimate marginal means and then conduct a mean separation analysis.
+
+So lets begin and conduct a one-way analysis of variance to compare whether there is any evidence of differences in average yield across the different treatment groups.
+
+### Summary Statistics
+
+When we have a grouping factor like `treat` the summary statistics and plots we might want to make are very similar to what we have been doing so far. Try to replicate the table below showing the mean and standard deviation of yield by treatment.
+
+```{r anovastats0, echo=FALSE}
+fallow %>%
+  group_by(treat) %>%
+    summarise(mean(yield),sd(yield))
+```
+
+```{r anovastats, exercise=TRUE}
+
+
+```
+
+```{r anovastats-solution}
+fallow %>%
+  group_by(treat) %>%
+    summarise(mean(yield),sd(yield))
+```
+
+### Summary plots
+
+Given we only have four observations per treatment it may not be appropriate to use a boxplot here as the number of observations per group is very small. So in this case plotting using a point geometry may be a better way of visualising the data
+
+
+```{r points, exercise=TRUE}
+ggplot(fallow,aes(y=yield,x=treat))+
+  geom_point()
+```
+
+Both the summary statistics and the plot above shows us pretty clearly that treatment "1 S.sesban" provides higher yields than the other treatments. The lowest yield for this treatment is still higher than any of the yields from any of the other treatments. Among the other 8 treatments we also see some which are performing less well - such as the treatments "5 C.siamea" and "8 maize" which have consistently low yields.
+
+### Specify a model for data
+
+The syntax and function for creating an ANOVA model is identical to a regression model. The only difference is that the predictor variable must be a categorical variable (like `treat`) rather than a continuous variable (like `striga`). 
+So - lets use the same `lm()` function. Like before when we run this by itself we don't get too much useful output.
+
+```{r anova_1,exercise=TRUE}
+lm(yield~treat,data=fallow)
+```
+
+So, exactly as in the previous section, we nearly always want to assign this to an object and then use various functions to investigate the model further.
+
+```{r anova_mod, exercise=TRUE}
+anova_mod<-lm(yield~treat,data=fallow)
+```
+
+`summary()` again provides us with the model summary information
+```{r anova_summary, exercise=TRUE}
+summary(anova_mod)
+```
+
+The output looks a little different to the simple linear regression output. Many things are the same, and have the same interpretation.  The R square value (84.9%) and residual standard error (0.4984) are in the same positions and have the same interpretations as before.
+
+However we now have a lot more coefficients - and these have a slightly different meaning when considering a categorical variable in an ANOVA model. These coefficients represent the difference between the mean values in each treatment and the mean value of the reference level. The reference level, by default, is the first level of our categorical variable when sorted alphabetically - in this case treatment "1 S.sesban". The intercept value represents the mean value within this reference level.
+
+Therefore the p-values shown in the summary output represent significance tests of hypotheses we may not be directly interested in. The test for the intercept is testing the hypothesis that the mean value of treatment 1 is 0. This is probably not a useful hypothesis. The tests for each of the coefficients are comparing whether each treatment is significantly different from treatment 1. This is somewhat useful, but it only tells us about the treatments in relation to the reference level. It cannot tell us about say, treatment 2 vs treatment 7, and it cannot tell us whether there is an overall effect of treatment. Although in this case the answer to that should be pretty clear!
+
+This is why we also often see an ANOVA table to show whether there is an overall effect of a categorical variable. The null hypothesis in this ANOVA table is that all of the treatments have the same mean yield. If it is a significant p-value then this suggests that at least one of the treatments has a different mean yield from the others. We can access the ANOVA table for a model by using the `anova()` function.
+
+
+```{r anova_tab, exercise=TRUE}
+anova(anova_mod)
+```
+Unsurprisingly this tells us that we have an overall significant treatment effect p = 3.144e-09. Remember that this is in scientific notation; another way of writing this number would be 0.000000003144
+
+### Checking Assumptions
+
+We have all of the same assumptions to check as when we ran the linear regression earlier, and we can assess the model checking plots using `plot()`. The only difference is that we are no longer checking for linearity, since we have 9 separate groups rather than a linear trend. But otherwise we still want to check if there are issues with heterogeneity, high leverage values, outliers and if there are severe violations of normality.
+
+```{r chks2, exercise=TRUE}
+plot(anova_mod)
+```
+
+Again - there are no clear violations of the assumptions being shown. However, as with the linear model, we may consider the possibility that we have a violation of the independence assumption. This would depend on exactly how the trial was designed:
+
+If we had one large field and each of the 36 plots was allocated randomly to the 9 treatments, a completely randomised design, then there would be no violation of independence; all of the plots would come from the same population.  
+
+If we had 4 'blocks' in different places across our station, and each block had one plot for each treatment, a completely randomised block design, then we would have a violation of independence. Since there would be four physical 'blocks' - we may expect plots in Block 1 to be similar to each other, and different to plots in Block 2. Whether or not this is likely to be an issue may depend on how variable the conditions are across the different blocks.  
+
+If we had 4 farmers, and each farmer plotted each treatment once, this is definitely a violation of the independence assumption. We cannot consider farmers to be replicates!  
+
+In the next section we will introduce generalised linear models to show you how to extend the models to allow for this.
+
+### Model Outputs and Post-Hoc tests
+
+In agricultural analyses it is very common to conduct post-hoc analyses from ANOVA models, often referred to as 'mean separation'. We can do this using the `emmeans` and `multcomp` libraries.
+
+First though, we may want to make some plots - showing the mean values of each of our treatments and including some confidence intervals around these estimates. We can do this using the `emmip()` function. 
+
+This function needs first the name of the model (in this case `anova_mod`), then a tilde `~` followed by the name of the grouping variable (in this case `~treat`.
+
+```{r plotCI, exercise=TRUE}
+emmip(anova_mod,~treat)
+```
+
+If we want confidence intervals to be included in the plot we also add an option `CI=TRUE`
+```{r plotCI2, exercise=TRUE}
+emmip(anova_mod,~treat,CI=TRUE)
+``` 
+
+This is a really nice function for making plots from models when we increase the complexity of our models, so it is worth learning about now!
+
+The data in this plot can be extracted using the `emmeans()` function. We don't need to ask for confidence intervals this time - they appear anyway!
+
+```{r estimates, exercise=TRUE}
+emmeans(anova_mod,~treat)
+```
+
+If you wanted to customise the output of `emmip` so that it looks nicer for your presentations, then you can obtain the numbers underlying the plot from this call to `emmeans` and then pipe it into `ggplot`. However we need to first convert the output into a data frame. This is a good opportunity to show you `geom_errorbar`. This `geom` requires two additional aesthetics we have not used so far - `ymax` to represent the top of the error bars and `ymin` for the bottom of the error bars.
+
+
+```{r geom_err,exercise=TRUE}
+emmeans(anova_mod,~treat) %>%
+  data.frame() %>%
+  ggplot(aes(y=emmean,x=treat,ymin=lower.CL,ymax=upper.CL))+
+    geom_point()+
+      geom_errorbar()
+```
+
+
+
+It is from this output that we can then conduct the mean separation analysis, by piping from this output into the `cld()` function. "cld" stands for "compact letter display", which is an alternative name for mean separation.
+
+
+```{r cld, exercise=TRUE}
+emmeans(anova_mod,~treat) %>%
+  cld()
+```
+By default this compares groups using the Tukey method, although others are available if you want them. The idea is that we can conclude that any treatments which do not have any overlapping entries in the `.group` column can be concluded to be significantly different. So here we can see that treatment 1 is significantly higher yielding than all other treatments; treatment 2 is significantly higher yielding than treatments 8,5 and 6, and so on.
+
+I tend to find agricultural researchers don't like seeing numbers to denote the groups - and much prefer letters. We can achieve this by adding the option `Letters=letters`. Note the case of this option!
+
+
+```{r cld_lets, exercise=TRUE}
+emmeans(anova_mod,~treat) %>%
+  cld(Letters=letters)
+```
+
+You can pipe these letters onto your plot with errorbars similarly to what we saw in the previous section. And this is now a good opportunity to show you another `geom` - `geom_text` for adding text onto a plot. This requires another aesthetic - `label` to represent the column containing the text labels to be plotted. 
+
+
+```{r cld_plot,exercise=TRUE}
+emmeans(anova_mod,~treat) %>%
+  cld(Letters=letters) %>% 
+  data.frame() %>%
+  ggplot(aes(y=emmean,x=treat,ymin=lower.CL,ymax=upper.CL,label=.group))+
+    geom_point()+
+      geom_errorbar()+
+        geom_text()
+```
+To make the labels a little bit to the left of the points I am going to use an additional argument within `geom_text` to move the x position of the label. It is plotted at the moment over the x and y co-ordinates as defined in the aesthetics. But we can use `nudge_x` and/or `nudge_y` to move this a little.
+
+```{r cld_plot2,exercise=TRUE}
+emmeans(anova_mod,~treat) %>%
+  cld(Letters=letters) %>% 
+  data.frame() %>%
+  ggplot(aes(y=emmean,x=treat,ymin=lower.CL,ymax=upper.CL,label=.group))+
+    geom_point()+
+      geom_errorbar()+
+        geom_text(nudge_x=-0.2)
+```
+
+## Generalised Linear Model
+
+As we have identified already the assumption that all of our observations are independent may not be reasonable within our design. 
+This is very common in agricultural analyses which will have specific layouts or involve operating with multiple farmers - this will invalidate the assumption that all observations are independent. In these sort of cases we need to move from a "general linear model" into a "generalised linear model" which can account for these structures. This is also known as a mixed model since it contains "fixed effects" (variables we are interested in) and "random" effects (variables outlining the structure or clustering of observations in the data)  You can see a presentation of the theory and application of linear mixed models in agriculture here: https://www.esalq.usp.br/departamentos/lce/arquivos/aulas/2012/LCE5872/MixedModelsPiracicaba.pdf
+
+Mathematically this is quite a bit more complicated - but thankfully in R it is not very different at all to move towards this model, you will see many of the same functions as in the previous sections. We will use the same libraries we have seen so far, but now also add the `lmertest` library to be able to fit a "linear mixed effects regression" (`lmer()`) model. This approach is incredibly flexible and can let us take into account any of the standard agricultural experimental designs as long as we are able to code the random effects appropriately. 
+
+But it also is the exact same approach we need for data which comes from less structured designs - from farm trials and surveys - where we have different forms of clustering (farmers within the same village) or pseudo-replication (the same farmer with multiple plots). It can be tricky to work out exactly how to structure the code for your model, don't be afraid to ask for help if you are unsure! There are resources at the end of this document which cover many of the more common agricultural designs - but the functions used will all be the same. This even applies to cases where we start to use non-Normal models - such as Poisson regression, for count data, or logistic regression, for binary data. In these cases we use again more or less the same syntax, and all the same functions, but now using the `glmer()` function, which can account for these modifications to the type of variable we use as a response. 
+It does not matter at all if we have continuous predictor variables, or categorical predictor variables, or a mixture of the two. All these models are fitted and interpreted in R in more or less exactly the same way.
+
+### Fitting the model
+
+In this design, an RCBD, we have one treatment factor, "treat", and one layout factor "rep". If we want to take into account this repeated blocks layout structure, we can’t use the “lm” function anymore and instead we need to include the “rep” blocking factor into the specification of a linear mixed effect model. Using the `lmer()` function to include a blocking factors, or "random effects" as they are known in statistics, we use a slightly different style of code. We use brackets and then within the brackets we write `1|variablename` , so in this case `(1|rep)`. Then the rest of the model code is the same as before - this time I will store as an object called `gen_lin_mod`.
+
+```{r glm, exercise=TRUE}
+gen_lin_mod<-lmer(yield~treat+(1|rep),data=fallow)
+```
+
+Again - to get anything useful out of the model we need to use additional functions - we can start with `summary()`.
+
+```{r glm2, exercise=TRUE}
+summary(gen_lin_mod)
+```
+The output looks a little different after we summarise a mixed effects model, although most things remain very similar. The table of coefficients is the same as before and has the same interpretation. The additional output showing the correlation between fixed effects is not very useful for us here, as in this designed experiment all treatments are replicated the same number of times.
+
+The residual error term is still presented but in a different place - this value is 0.4843 which can be found in the "Random Effects" table. This sort of model breaks down the variance into that which can be explained by our design factors (the `rep` term) and that which is left over as residual variance. Comparing the amount of the variance explained by each component can be useful to give us an understanding of how much our design factors are influencing our outcome variable. In this case the amount of variance explained by the `rep` (standard deviation = 0.1175) is fairly small in relation to the residual variance (standard deviation = 0.4843).
+
+One thing which is missing when we compared to output of running `summary` after an `lm` is the R-squared value. This can be optained by using the function `r.squaredGLMM` which comes from the `MuMIn` library.
+
+```{r r2, exercise=TRUE}
+r.squaredGLMM(gen_lin_mod)
+```
+Two versions of R-squared as shown - the  marginal R square `R2m`- which shows only the variance explained by the "fixed effects" in this case the treatment term. The conditional R-squared `R2c` shows the effect of both the fixed and random effects - so includes both `rep` and `treat`. So we can see 81% of the variability in yield is explained by the different treatments, and this increases to 82.3% is we include rep as well.
+
+To obtain an ANOVA table - we can obtain this as before using `anova(model)`
+
+
+```{r glm_anova, exercise=TRUE}
+anova(gen_lin_mod)
+```
+The ANOVA table only includes the fixed effects - showing us a highly significant p-value for treatment, providing evidence of some overall differences between our treatments. We could also test whether our random effects are significant using `ranova`.
+
+
+```{r ranova, exercise=TRUE}
+ranova(gen_lin_mod)
+```
+
+This does not show us a significant effect of the different `reps` we have in the data. However because this variable is describing the structure of our data, this is usually not something we are particularly interested in. With structural variables, we generally want to account for any impact they may have on the analysis whether or not they could be considered to be statistically significant. But to help your understanding, note that this non-significance would suggest that the results we got from the last section using the “lm” function was probably somewhat reliable, despite not having taken into account the layout structure in blocks.
+
+### Check the model
+
+We have many of the same assumptions to check with this model as well, although the functions here work a little differently to before.
+
+The function `plot()` will only plot the fitted values from the model against the expected values.
+
+
+```{r glm_plt, exercise=TRUE}
+plot(gen_lin_mod)
+```
+We can check most of the key assumptions from this one plot. The residual Vs fitted plot is a scatter plot of the Residuals on the y-axis and the fitted on the x-axis and the aim for this plot is to test the assumption of equal variance of the residuals across the range of fitted values. Since the residuals do not funnel out (to form triangular/diamond shape) the assumption of equal variance is met. 
+
+We can also see that there are no extreme values in the residuals which might be potentially causing problems with the validity of our conclusions (leverage)
+
+To assess the assumption of approximate normality we can produce the same plot as before if we extract the residuals and use the function `qqnorm`. This shows us how closely the residuals follow a normal distribution - if there are severe and systematic deviations from the line then we may want to consider an alternative distribution. The most elegant way of doing this is to use pipes - firstly to obtain the residuals and then to pipe those residuals into the `qqnorm` function..
+
+```{r qqplot, exercise=TRUE}
+gen_lin_mod %>%
+   resid() %>%
+      qqnorm() 
+```
+In this case the residuals seem to fit the assumption required for normality.
+
+### Post-hoc tests
+
+The functions we saw in the previous section, `emmip` and `emmeans` and `cld` all work in exactly the same way. All we need to change is the input model object, and we obtain the plots with confidence intervals and the mean seperation analysis.
+
+```{r emmip_glm, exercise=TRUE}
+emmip(gen_lin_mod,~treat,CIs = TRUE)
+```
+
+
+```{r cldglm, exercise=TRUE}
+emmeans(gen_lin_mod, ~treat) %>%
+  cld(Letters=letters)
+```
+
+In the output, groups sharing a letter in the .group are not statistically different from each other as before.
+
+Using the example from the previous section, see if you can write the code to make a plot showing the results from the `lmer` model including the letter displays and the error bars
+
+```{r cldplt, exercise=TRUE}
+
+```
+
+```{r cldplt-solution}
+emmeans(gen_lin_mod, ~treat) %>%
+  cld(Letters=letters)  %>% 
+  data.frame() %>%
+  ggplot(aes(y=emmean,x=treat,ymin=lower.CL,ymax=upper.CL,label=.group))+
+    geom_point()+
+      geom_errorbar()+
+        geom_text(nudge_x=-0.2)
+   
+```
+
+### Model choices
+
+Ultimately our model fitted using a generalised linear mixed model, with a random effect to account for block, using `lmer` provided almost identical results to the standard linear model fitted using `lm`. However, this is because the blocking in this experiment had very little impact on the results - it was an on-station trial with very controlled conditions and similar environments across the four blocks. In increasingly complex situations, particularly those with farmers conducting multiple treatments or with clusters of farmers in very different situations, very different results would be obtained from these two modelling approaches. Plots on one farmers field will be similar to other plots on the same field but likely extremely different to another farmer's plots. In cases where very different results are found then it is usually worth trying to understand why! You will see an example of thi in the exercises. Don't be afraid to ask for help in these situations.
+
+## Methodological Principles
+
+There are always many different ways of doing all that we have done here in R. If you look for guidance online about how to analyse particular designs you may find lots of different options for analysing "split plot" designs or "survey" data. It is always a good idea to ask for help when starting to analyse data if you are not sure about the way it should be analysed - you should make sure however you analyse the data it is done in a way which lets you address the questions that are most relevant to you. This is the big advantage of using the approach shown in this tutorial of the `lmer` and `lm` functions - they are incredibly flexible and can be used in many different situations. 
+
+For instance, we demonstrated fitting our model as a linear mixed effect model rather than traditional ANOVA. Although the analysis in this instance was not effected too much by this change the `lmer` model has a number of other advantages as well: 
+
+1.	They are very flexible especially where we have repeated measures, for instance you don’t need to have the same number of observations per subject/treatment.
+2.	Ability to account for a series of random effects. Not only are farms/farmers/plots…. different from each other, but things with in farms/plots….. also differ . Not taking these sources of variation into account will lead to underestimations of accuracy.
+3.	Allows for generalization of non-normal data.  
+4.	Handling missing data: If the percentage of missing data is small and that data missing is a random sample of the data set,data from the observations with missing data can be analysed with `lmer` (unlike other packages that would do listwise deletion).
+5.	Takes into account variation that is explained by the predictor variables of interest ie fixed effects and variation that is not explained by these predictors ie random effects.
+
+## Exercises
+
+As in the last module it is now up to you to use RStudio to complete the exercises on your own computer.
+
+You can download the files you need [by clicking on this link here](https://github.com/stats4sd/R4CCRP_07Models/blob/main/Exercises.zip?raw=true)
+
+Make sure you unzip these into a new folder, and then start a new project file based on that folder, like we learnt in the previous module.
+
+You should need to install some of the packages used before proceeding. Make sure you have these installed and loaded, by running the first code chunk, before you try to start solving any of the questions!
+
+
+
+## More examples of analysis
+
+You can find more examples in a similar style here:
+https://shiny.stats4sd.org/AgAnalysis/
+
+A more wide ranging set of agricultural analysis can be seen here:
+https://rstats4ag.org/
+
+There are also specific packages for other types of agricultural analyses, like the `agricolae` library. There is an extensive tutorial on the analysis and design functions included in this package here:
+https://pbil.univ-lyon1.fr/CRAN/web/packages/agricolae/vignettes/tutorial.pdf
+
+

@@ -1,0 +1,217 @@
+# Module 7 Exercises
+
+## Setup
+
+To begin with we will need to load the libraries and data we will use in this session. There are many new libraries to be used so make sure you install these before proceeding!
+
+```{r}
+#you should have these already!
+library(dplyr)
+library(ggplot2)
+library(janitor)
+
+#these are probably new
+library(lmerTest)
+library(multcomp)
+library(emmeans)
+library(MuMIn)
+library(agridat)
+
+
+```
+
+
+## Exercise 1
+
+We are going to start with a seemingly simple example from a data set which is built into R from the `agridat` library.
+
+With built in data sets the first time we want to use them we refer to them by name using the `data` function. This dataset is from an experiment of 8 different barley varieties which compares the yields. 
+
+Run the code below to import this data and see the structure. Each variety is replicated 20 times in this experiment on the same field. The grid layout of the field is captured by the row and column fields, the different barley varieties are in the gen column and the yields are in the yield column.
+```{r}
+data(beaven.barley)
+beaven.barley
+```
+To begin with let us assume our observations are independent - they are all on the same field after all!
+
+*Question 1 : Make a boxplot showing yields by genotype using `ggplot`. Interpret what this is showing* 
+
+```{r}
+
+ggplot(data=beaven.barley,aes(y=yield,x=gen))+
+  geom_boxplot()
+
+```
+*Question 2 : Calculate the mean and standard deviations of yield by genotype using `group_by` and `summarise`* 
+
+```{r}
+beaven.barley %>%
+  group_by(gen) %>%
+    summarise(mean(yield),sd(yield))
+```
+
+*Question 3: Fit an ANOVA model of yield by genotype using the `lm` function. Store it as an object called barley1`*
+
+```{r}
+barley1<-lm(yield~gen,data=beaven.barley)
+```
+
+*Question 4: Use the summary and anova functions on the model to provide some statistics about the results. What do these tell you?*
+
+```{r}
+anova(barley1)
+summary(barley1)
+```
+
+*Question 5: Use the plot function to check the residuals. Does anything look problematic?*
+
+```{r}
+plot(barley1)
+```
+
+*Question 6: Use the emmeans() function to obtain the estimated means and confidence intervals for each genotype. Then pipe this into the cld() function to conduct the mean seperation analysis*
+
+```{r}
+emmeans(barley1,~gen)
+```
+```{r}
+emmeans(barley1,~gen) %>%
+  cld()
+```
+
+## Exercise 2
+
+When we completed exercise 1 we assumed all points were independent and the layout factors were not relevant. Let's investigate this further.
+
+*Question 1 : Using the `tabyl` function produce two tables to show the frequencies of how many times each genotype appears in each row (table 1) and each column (table 2)*
+
+```{r}
+tabyl(beaven.barley,gen,row)
+tabyl(beaven.barley,gen,col)
+```
+
+You should see that each genotype appears 4 times per row. Not all genotypes appear in all columns but there is clearly an attempt to make a balanced design.
+
+*Question 2: Make two boxplots showing the yield distributions in each row (1) and then in each column (2).What do you notice?*
+Hint - the warning message you may see is trying to help you! Pay attention to what it says.
+```{r}
+ggplot(data=beaven.barley,aes(y=yield,x=row,group=row))+
+  geom_boxplot()
+
+ggplot(data=beaven.barley,aes(y=yield,x=col,group=col))+
+  geom_boxplot()
+
+```
+
+*Question 3: Let's now fit a model using lmer() and save it an object called barley2. The random effects for this row column layout should be specified as one random effect for row, and one for column. So the random part of the model code should look like "(1|row)+(1|col)"*
+
+
+```{r}
+barley2<-lmer(yield~gen+(1|row)+(1|col),data=beaven.barley)
+```
+
+*Question 4: Use the summary(), anova(), plot() and also the r.squaredGLMM() to investigate this model, and compare it to the results from exercise 1. What do you notice? Can you explain the differences?*
+
+```{r}
+summary(barley2)
+```
+
+```{r}
+r.squaredGLMM(barley2)
+```
+
+```{r}
+anova(barley2)
+```
+
+```{r}
+plot(barley2)
+```
+
+
+*Question 5: Carry out the mean separation analysis on the new model, to obtain adjusted means, confidence intervals, and the letter display. Compare again to the results from exercise 1 - what do you notice?* 
+```{r}
+emmeans(barleymod2,~gen) %>%
+  cld()
+```
+
+## Exercise 3
+
+Now let's go back to the fallow data from the tutorial
+
+```{r}
+fallow <- read.csv("Fallow N2.csv")
+```
+
+Conduct an analysis of how the striga count varies across the different fallow treatments. Pick what you thing is a sensible model, and come to some conclusions about how striga varies by treatment. Pay close attention to the model checking plots! There may be some problems where you might wish to make some transformations to your striga variable!
+
+
+
+```{r}
+ggplot(data=fallow,aes(y=striga,x=treat))+
+  geom_point()
+
+ggplot(data=fallow,aes(y=striga,x=rep))+
+  geom_point()
+
+fallow %>%
+  group_by(treat) %>%
+    summarise(mean(striga),sd(striga),median(striga))
+
+```
+
+
+
+```{r}
+strigamod<-lm(striga~treat,data=fallow)
+```
+
+```{r}
+plot(strigamod)
+```
+
+```{r}
+strigamod2<-lm(log(striga+1)~treat,data=fallow)
+```
+
+```{r}
+strigamod3<-lmer(log(striga+1)~treat+(1|rep),data=fallow)
+```
+
+```{r}
+anova(strigamod3)
+summary(strigamod3)
+```
+
+
+```{r}
+plot(strigamod3)
+```
+
+```{r}
+anova(strigamod)
+anova(strigamod2)
+anova(strigamod3)
+```
+```{r}
+r.squaredGLMM(strigamod3)
+r.squaredGLMM(strigamod2)
+r.squaredGLMM(strigamod)
+```
+
+
+```{r}
+emmeans(strigamod,~treat) %>%
+  cld()
+```
+
+
+```{r}
+emmeans(strigamod2,~treat,type="response") %>%
+  cld()
+```
+
+```{r}
+emmeans(strigamod3,~treat,type="response") %>%
+  cld()
+```
